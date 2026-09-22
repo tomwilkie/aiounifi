@@ -8,7 +8,7 @@ from copy import deepcopy
 import pytest
 
 from aiounifi.errors import AiounifiException
-from aiounifi.models.network import NetworkListRequest, NetworkUpdateRequest
+from aiounifi.models.network import Network, NetworkListRequest, NetworkUpdateRequest
 
 from .fixtures import NETWORKS
 
@@ -25,15 +25,46 @@ def test_network_list_request():
 
 
 def test_network_update_request():
-    """Test network update request carries the full object."""
-    network = deepcopy(NETWORKS[0])
-    network["wan_failover_priority"] = 3
+    """Test network update request carries the full object with overrides applied."""
+    network = Network(deepcopy(NETWORKS[0]))
 
-    request = NetworkUpdateRequest.create(network)
+    request = NetworkUpdateRequest.create(network, wan_failover_priority=3)
 
     assert request.method == "put"
     assert request.path == f"/rest/networkconf/{WAN1_ID}"
-    assert request.data == network
+    assert request.data == {**network.raw, "wan_failover_priority": 3}
+    # The cached item is left untouched until the controller accepts the change.
+    assert network.wan_failover_priority == 1
+
+
+def test_network_update_request_all_overrides():
+    """Test every supported override is applied to the payload."""
+    network = Network(deepcopy(NETWORKS[0]))
+
+    request = NetworkUpdateRequest.create(
+        network,
+        enabled=False,
+        wan_failover_priority=3,
+        wan_load_balance_type="failover-only",
+        wan_load_balance_weight=20,
+    )
+
+    assert request.data == {
+        **network.raw,
+        "enabled": False,
+        "wan_failover_priority": 3,
+        "wan_load_balance_type": "failover-only",
+        "wan_load_balance_weight": 20,
+    }
+
+
+def test_network_update_request_without_overrides():
+    """Test network update request without overrides resends the object as is."""
+    network = Network(deepcopy(NETWORKS[0]))
+
+    request = NetworkUpdateRequest.create(network)
+
+    assert request.data == network.raw
 
 
 @pytest.mark.usefixtures("_mock_endpoints")
@@ -90,20 +121,20 @@ async def test_network_save(mock_aioresponse, unifi_controller, unifi_called_wit
     networks = unifi_controller.networks
     await networks.update()
 
-    network = deepcopy(networks[WAN1_ID].raw)
-    network["wan_load_balance_weight"] = 60
+    network = networks[WAN1_ID]
+    expected = {**deepcopy(network.raw), "wan_load_balance_weight": 60}
 
     mock_aioresponse.put(
         f"https://host:8443/api/s/default/rest/networkconf/{WAN1_ID}",
-        payload={"meta": {"rc": "ok"}, "data": [network]},
+        payload={"meta": {"rc": "ok"}, "data": [expected]},
     )
 
-    await networks.save(network)
+    await networks.save(network, wan_load_balance_weight=60)
 
     assert unifi_called_with(
         "put",
         f"/api/s/default/rest/networkconf/{WAN1_ID}",
-        json=network,
+        json=expected,
     )
     assert networks[WAN1_ID].wan_load_balance_weight == 60
 
@@ -117,9 +148,6 @@ async def test_network_save_duplicate_failover_priority(
     networks = unifi_controller.networks
     await networks.update()
 
-    network = deepcopy(networks[WAN1_ID].raw)
-    network["wan_failover_priority"] = 2
-
     mock_aioresponse.put(
         f"https://host:8443/api/s/default/rest/networkconf/{WAN1_ID}",
         payload={
@@ -129,7 +157,7 @@ async def test_network_save_duplicate_failover_priority(
     )
 
     with pytest.raises(AiounifiException):
-        await networks.save(network)
+        await networks.save(networks[WAN1_ID], wan_failover_priority=2)
 
     assert networks[WAN1_ID].wan_failover_priority == 1
 

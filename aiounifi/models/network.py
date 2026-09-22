@@ -1,9 +1,11 @@
 """Networks as part of a UniFi network."""
 
 from dataclasses import dataclass
-from typing import NotRequired, Self, TypedDict
+from typing import Literal, NotRequired, Self, TypedDict
 
 from .api import ApiItem, ApiRequest
+
+WanLoadBalanceType = Literal["failover-only", "weighted"]
 
 
 class TypedNetwork(TypedDict):
@@ -21,38 +23,10 @@ class TypedNetwork(TypedDict):
     vlan_enabled: NotRequired[bool]
     wan_dns_preference: NotRequired[str]
     wan_failover_priority: NotRequired[int]
-    wan_load_balance_type: NotRequired[str]
+    wan_load_balance_type: NotRequired[WanLoadBalanceType]
     wan_load_balance_weight: NotRequired[int]
     wan_networkgroup: NotRequired[str]
     wan_type: NotRequired[str]
-
-
-@dataclass
-class NetworkListRequest(ApiRequest):
-    """Request object for network list."""
-
-    @classmethod
-    def create(cls) -> Self:
-        """Create network list request."""
-        return cls(method="get", path="/rest/networkconf")
-
-
-@dataclass
-class NetworkUpdateRequest(ApiRequest):
-    """Request object for network update."""
-
-    @classmethod
-    def create(cls, network: TypedNetwork) -> Self:
-        """Create network update request.
-
-        The controller rejects partial payloads, so the full network object
-        has to be provided with the desired fields already modified.
-        """
-        return cls(
-            method="put",
-            path=f"/rest/networkconf/{network['_id']}",
-            data=network,
-        )
 
 
 class Network(ApiItem):
@@ -96,7 +70,7 @@ class Network(ApiItem):
         return self.raw.get("wan_failover_priority")
 
     @property
-    def wan_load_balance_type(self) -> str | None:
+    def wan_load_balance_type(self) -> WanLoadBalanceType | None:
         """WAN load balance type, failover-only or weighted."""
         return self.raw.get("wan_load_balance_type")
 
@@ -109,3 +83,48 @@ class Network(ApiItem):
     def wan_type(self) -> str | None:
         """WAN connection type."""
         return self.raw.get("wan_type")
+
+
+@dataclass
+class NetworkListRequest(ApiRequest):
+    """Request object for network list."""
+
+    @classmethod
+    def create(cls) -> Self:
+        """Create network list request."""
+        return cls(method="get", path="/rest/networkconf")
+
+
+@dataclass
+class NetworkUpdateRequest(ApiRequest):
+    """Request object for network update."""
+
+    @classmethod
+    def create(
+        cls,
+        network: Network,
+        *,
+        enabled: bool | None = None,
+        wan_failover_priority: int | None = None,
+        wan_load_balance_type: WanLoadBalanceType | None = None,
+        wan_load_balance_weight: int | None = None,
+    ) -> Self:
+        """Create network update request.
+
+        The controller rejects partial payloads, so the full network object is
+        sent with the requested fields overridden.
+        """
+        data = network.raw.copy()
+        if enabled is not None:
+            data["enabled"] = enabled
+        if wan_failover_priority is not None:
+            data["wan_failover_priority"] = wan_failover_priority
+        if wan_load_balance_type is not None:
+            data["wan_load_balance_type"] = wan_load_balance_type
+        if wan_load_balance_weight is not None:
+            data["wan_load_balance_weight"] = wan_load_balance_weight
+        return cls(
+            method="put",
+            path=f"/rest/networkconf/{data['_id']}",
+            data=data,
+        )

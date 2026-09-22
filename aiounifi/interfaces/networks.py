@@ -6,7 +6,7 @@ from ..models.network import (
     Network,
     NetworkListRequest,
     NetworkUpdateRequest,
-    TypedNetwork,
+    WanLoadBalanceType,
 )
 from .api_handlers import APIHandler
 
@@ -19,8 +19,24 @@ class Networks(APIHandler[Network]):
     process_messages = (MessageKey.NETWORK_CONF_UPDATED,)
     api_request = NetworkListRequest.create()
 
-    async def save(self, network: TypedNetwork) -> TypedApiResponse:
-        """Write a full network object back to the controller."""
-        response = await self.controller.request(NetworkUpdateRequest.create(network))
+    async def save(
+        self,
+        network: Network,
+        *,
+        enabled: bool | None = None,
+        wan_failover_priority: int | None = None,
+        wan_load_balance_type: WanLoadBalanceType | None = None,
+        wan_load_balance_weight: int | None = None,
+    ) -> TypedApiResponse:
+        """Set network - defined in controller - to the desired state."""
+        response = await self.controller.request(
+            NetworkUpdateRequest.create(
+                network,
+                enabled=enabled,
+                wan_failover_priority=wan_failover_priority,
+                wan_load_balance_type=wan_load_balance_type,
+                wan_load_balance_weight=wan_load_balance_weight,
+            )
+        )
         self.process_raw(response.get("data", []))
         return response
